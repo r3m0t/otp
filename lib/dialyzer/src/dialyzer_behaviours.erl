@@ -61,7 +61,7 @@ check_callbacks(Module, Attrs, Plt, Codeserver) ->
     [] -> [];
     _ ->
       MFA = {Module,module_info,0},
-      {_Var,Code} = dialyzer_codeserver:lookup_mfa_code(MFA, Codeserver),
+      {_Var,Code} = dialyzer_codeserver:lookup_mfa_code(MFA),
       File = get_file(cerl:get_ann(Code)),
       State = #state{plt = Plt, filename = File, behlines = BehLines,
 		     codeserver = Codeserver},
@@ -212,10 +212,9 @@ add_tag_file_line(_Module, {Tag, [File, Line|R]}, _State)
   when Tag =:= callback_spec_type_mismatch;
        Tag =:= callback_spec_arg_type_mismatch ->
   {?WARN_BEHAVIOUR, {File, Line}, {Tag, R}};
-add_tag_file_line(Module, {_Tag, [_B, Fun, Arity|_R]} = Warn, State) ->
+add_tag_file_line(Module, {_Tag, [_B, Fun, Arity|_R]} = Warn, _State) ->
   {_A, FunCode} =
-    dialyzer_codeserver:lookup_mfa_code({Module, Fun, Arity},
-					State#state.codeserver),
+    dialyzer_codeserver:lookup_mfa_code({Module, Fun, Arity}),
   Anns = cerl:get_ann(FunCode),
   FileLine = {get_file(Anns), get_line(Anns)},
   {?WARN_BEHAVIOUR, FileLine, Warn}.

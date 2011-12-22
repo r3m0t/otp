@@ -27,7 +27,7 @@
 %%%-------------------------------------------------------------------
 -module(dialyzer_codeserver).
 
--export([delete/1,
+-export([delete/0,
 	 finalize_contracts/3,
          finalize_exported_types/2,
 	 finalize_records/2,
@@ -40,12 +40,12 @@
 	 get_temp_contracts/1,
          get_temp_exported_types/1,
 	 get_temp_records/1,
-	 insert/3,
+	 insert/2,
 	 insert_exports/2,
          insert_temp_exported_types/2,
 	 is_exported/2,
-	 lookup_mod_code/2,
-	 lookup_mfa_code/2,
+	 lookup_mod_code/1,
+	 lookup_mfa_code/1,
 	 lookup_mod_records/2,
 	 lookup_mod_contracts/2,
 	 lookup_mfa_contract/2,
@@ -61,10 +61,11 @@
 
 -include("dialyzer.hrl").
 
+-define(CODESERVER, dialyzer_codeserver).
+
 %%--------------------------------------------------------------------
 
--record(codeserver, {table_pid		              :: ets:tid(),
-                     exported_types      = sets:new() :: set(), % set(mfa())
+-record(codeserver, {exported_types      = sets:new() :: set(), % set(mfa())
                      temp_exported_types = sets:new() :: set(), % set(mfa())
 		     exports             = sets:new() :: set(), % set(mfa())
 		     next_core_label     = 0          :: label(),
@@ -83,16 +84,17 @@
 -spec new() -> codeserver().
 
 new() ->
-  #codeserver{table_pid = ets:new(dialyzer_codeserver, [private, compressed])}.
+  ?CODESERVER = ets:new(?CODESERVER, [private, compressed, named_table]),
+  #codeserver{}.
 
--spec delete(codeserver()) -> 'ok'.
+-spec delete() -> 'true'.
 
-delete(#codeserver{table_pid = TablePid}) ->
-  ets:delete(TablePid).
+delete() ->
+  ets:delete(?CODESERVER).
 
--spec insert(atom(), cerl:c_module(), codeserver()) -> codeserver().
+-spec insert(atom(), cerl:c_module()) -> 'true'.
 
-insert(Mod, ModCode, CS) ->
+insert(Mod, ModCode) ->
   Name = cerl:module_name(ModCode),
   Exports = cerl:module_exports(ModCode),
   Attrs = cerl:module_attrs(ModCode),
@@ -102,9 +104,7 @@ insert(Mod, ModCode, CS) ->
     [{{Mod, cerl:fname_id(Var), cerl:fname_arity(Var)},
       Val} || Val = {Var, _Fun} <- Defs],
   Keys = [Key || {Key, _Value} <- Funs],
-  ets:insert(CS#codeserver.table_pid,
-	     [{Mod, {Name, Exports, Attrs, Keys, As}} | Funs]),
-  CS.
+  ets:insert(?CODESERVER, [{Mod, {Name, Exports, Attrs, Keys, As}} | Funs]).
 
 -spec insert_temp_exported_types(set(), codeserver()) -> codeserver().
 
@@ -143,15 +143,15 @@ get_exports(#codeserver{exports = Exports}) ->
 finalize_exported_types(Set, CS) ->
   CS#codeserver{exported_types = Set, temp_exported_types = sets:new()}.
 
--spec lookup_mod_code(atom(), codeserver()) -> cerl:c_module().
+-spec lookup_mod_code(atom()) -> cerl:c_module().
 
-lookup_mod_code(Mod, CS) when is_atom(Mod) ->
-  table__lookup(CS#codeserver.table_pid, Mod).
+lookup_mod_code(Mod) when is_atom(Mod) ->
+  table__lookup(Mod).
 
--spec lookup_mfa_code(mfa(), codeserver()) -> {cerl:c_var(), cerl:c_fun()}.
+-spec lookup_mfa_code(mfa()) -> {cerl:c_var(), cerl:c_fun()}.
 
-lookup_mfa_code({_M, _F, _A} = MFA, CS) ->
-  table__lookup(CS#codeserver.table_pid, MFA).
+lookup_mfa_code({_M, _F, _A} = MFA) ->
+  table__lookup(MFA).
 
 -spec get_next_core_label(codeserver()) -> label().
 
@@ -278,9 +278,12 @@ finalize_contracts(CnDict, CbDict, CS)  ->
 		temp_callbacks = dict:new()
 	       }.
 
-table__lookup(TablePid, M) when is_atom(M) ->
-  {Name, Exports, Attrs, Keys, As} = ets:lookup_element(TablePid, M, 2),
-  Defs = [table__lookup(TablePid, Key) || Key <- Keys],
+table__lookup(M) when is_atom(M) ->
+  {Name, Exports, Attrs, Keys, As} = ets_lookup(M),
+  Defs = [table__lookup(Key) || Key <- Keys],
   cerl:ann_c_module(As, Name, Exports, Attrs, Defs);
-table__lookup(TablePid, MFA) ->
-  ets:lookup_element(TablePid, MFA, 2).
+table__lookup(MFA) ->
+  ets_lookup(MFA).
+
+ets_lookup(Key) ->
+  ets:lookup_element(?CODESERVER, Key, 2).

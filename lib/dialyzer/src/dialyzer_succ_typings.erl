@@ -122,7 +122,7 @@ get_warnings_from_modules([M|Ms], State, DocPlt, Acc) when is_atom(M) ->
   send_log(State#st.parent, io_lib:format("Getting warnings for ~w\n", [M])),
   #st{callgraph = Callgraph, codeserver = Codeserver,
       no_warn_unused = NoWarnUnused, plt = Plt} = State,
-  ModCode = dialyzer_codeserver:lookup_mod_code(M, Codeserver),
+  ModCode = dialyzer_codeserver:lookup_mod_code(M),
   Records = dialyzer_codeserver:lookup_mod_records(M, Codeserver),
   Contracts = dialyzer_codeserver:lookup_mod_contracts(M, Codeserver),
   AllFuns = collect_fun_info([ModCode]),
@@ -198,7 +198,7 @@ refine_succ_typings([], State, Fixpoint) ->
 
 refine_one_module(M, State) ->
   #st{callgraph = Callgraph, codeserver = CodeServer, plt = PLT} = State,
-  ModCode = dialyzer_codeserver:lookup_mod_code(M, CodeServer),
+  ModCode = dialyzer_codeserver:lookup_mod_code(M),
   AllFuns = collect_fun_info([ModCode]),
   FunTypes = get_fun_types_from_plt(AllFuns, Callgraph, PLT),
   Records = dialyzer_codeserver:lookup_mod_records(M, CodeServer),
@@ -302,7 +302,7 @@ analyze_scc(SCC, #st{codeserver = Codeserver,
 		     callgraph = Callgraph,
 		     plt = Plt} = State) ->
   SCC_Info = [{MFA, 
-	       dialyzer_codeserver:lookup_mfa_code(MFA, Codeserver),
+	       dialyzer_codeserver:lookup_mfa_code(MFA),
 	       dialyzer_codeserver:lookup_mod_records(M, Codeserver)}
 	      || {M, _, _} = MFA <- SCC],
   Contracts1 = [{MFA, dialyzer_codeserver:lookup_mfa_contract(MFA, Codeserver)}
@@ -542,11 +542,11 @@ analyze_module(LabeledTree, NextLbl, Plt, Records, Contracts) ->
   CallGraph4 = dialyzer_callgraph:finalize(CallGraph3),
   CodeServer1 = dialyzer_codeserver:new(),
   Mod = cerl:concrete(cerl:module_name(LabeledTree)),
-  CodeServer2 = dialyzer_codeserver:insert(Mod, LabeledTree, CodeServer1),
-  CodeServer3 = dialyzer_codeserver:set_next_core_label(NextLbl, CodeServer2),
+  true = dialyzer_codeserver:insert(Mod, LabeledTree),
+  CodeServer3 = dialyzer_codeserver:set_next_core_label(NextLbl, CodeServer1),
   CodeServer4 = dialyzer_codeserver:store_records(Mod, Records, CodeServer3),
   CodeServer5 = dialyzer_codeserver:store_contracts(Mod, Contracts, CodeServer4),
   Res = analyze_callgraph(CallGraph4, Plt, CodeServer5),
   dialyzer_callgraph:delete(CallGraph4),
-  dialyzer_codeserver:delete(CodeServer5),
+  dialyzer_codeserver:delete(),
   Res.

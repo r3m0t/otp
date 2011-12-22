@@ -101,10 +101,10 @@ start() ->
 
 extract(#analysis{macros = Macros,
 		  includes = Includes,
-		  trust_plt = TrustPLT} = Analysis, TrustedFiles) ->
+		  trust_plt = TrustPLT,
+		  codeserver = CodeServer} = Analysis, TrustedFiles) ->
   %% io:format("--- Extracting trusted typer_info... "),
   Ds = [{d, Name, Value} || {Name, Value} <- Macros],
-  CodeServer = dialyzer_codeserver:new(),
   Fun =
     fun(File, CS) ->
 	%% We include one more dir; the one above the one we are trusting
@@ -888,8 +888,8 @@ analyze_core_tree(Core, Records, SpecInfo, CbInfo, ExpTypes, Analysis, File) ->
   CS1 = Analysis#analysis.codeserver,
   NextLabel = dialyzer_codeserver:get_next_core_label(CS1),
   {Tree, NewLabel} = cerl_trees:label(TmpTree, NextLabel),
-  CS2 = dialyzer_codeserver:insert(Module, Tree, CS1),
-  CS3 = dialyzer_codeserver:set_next_core_label(NewLabel, CS2),
+  true = dialyzer_codeserver:insert(Module, Tree),
+  CS3 = dialyzer_codeserver:set_next_core_label(NewLabel, CS1),
   CS4 = dialyzer_codeserver:store_temp_records(Module, Records, CS3),
   CS5 =
     case Analysis#analysis.no_spec of

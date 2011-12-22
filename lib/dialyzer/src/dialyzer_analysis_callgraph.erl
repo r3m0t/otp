@@ -398,8 +398,8 @@ label_core(Core, CServer) ->
 store_code_and_build_callgraph(Mod, Core, Callgraph, CServer, NoWarn) ->
   CoreTree = cerl:from_records(Core),
   NewCallgraph = dialyzer_callgraph:scan_core_tree(CoreTree, Callgraph),
-  CServer2 = dialyzer_codeserver:insert(Mod, CoreTree, CServer),
-  {ok, NewCallgraph, NoWarn, CServer2, Mod}.
+  true = dialyzer_codeserver:insert(Mod, CoreTree),
+  {ok, NewCallgraph, NoWarn, CServer, Mod}.
 
 %%--------------------------------------------------------------------
 %% Utilities
@@ -519,7 +519,7 @@ format_bad_calls([{{_, _, _}, {_, module_info, A}}|Left], CodeServer, Acc)
   when A =:= 0; A =:= 1 ->
   format_bad_calls(Left, CodeServer, Acc);
 format_bad_calls([{FromMFA, {M, F, A} = To}|Left], CodeServer, Acc) ->
-  {_Var, FunCode} = dialyzer_codeserver:lookup_mfa_code(FromMFA, CodeServer),
+  {_Var, FunCode} = dialyzer_codeserver:lookup_mfa_code(FromMFA),
   Msg = {call_to_missing, [M, F, A]},
   FileLine = find_call_file_and_line(FunCode, To),
   NewAcc = [{?WARN_CALLGRAPH, FileLine, Msg}|Acc],
