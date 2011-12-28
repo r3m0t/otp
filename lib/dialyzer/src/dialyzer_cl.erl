@@ -591,6 +591,9 @@ cl_loop(State, LogCache) ->
     {BackendPid, mod_deps, ModDeps} ->
       NewState = State#cl_state{mod_deps = ModDeps},
       cl_loop(NewState, LogCache);
+    {BackendPid, cserver, CServer, _Plt} ->
+      gen_server:cast(CServer, stop),
+      cl_loop(State, LogCache);
     {'EXIT', BackendPid, {error, Reason}} ->
       Msg = failed_anal_msg(Reason, LogCache),
       cl_error(State, Msg);
