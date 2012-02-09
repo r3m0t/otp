@@ -148,7 +148,11 @@ handle_call(Query, _From, #codeserver{
       get_contracts ->
 	ContDict;
       get_callbacks ->
-	CallDict;
+	FunPreferNew = fun(_Key, _Val1, Val2) -> Val2 end,
+	FunDictMerger =
+	  fun(_Key, Value, AccIn) -> dict:merge(FunPreferNew, Value, AccIn) end,
+	MergedCallbacks = dict:fold(FunDictMerger, dict:new(), CallDict),
+	dict:to_list(MergedCallbacks);
       get_temp_contracts ->
 	{TempContDict, TempCallDict}
     end,
