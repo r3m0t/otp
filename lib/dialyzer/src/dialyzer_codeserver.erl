@@ -167,6 +167,7 @@ handle_cast(Msg, #codeserver{
 	      contracts = ContDict,
 	      exports = Exports,
 	      records = RecDict,
+	      temp_exported_types = TempExpTypes,
 	      temp_callbacks = TempCallDict,
 	      temp_contracts = TempContDict,
 	      temp_records = TempRecDict
@@ -174,7 +175,8 @@ handle_cast(Msg, #codeserver{
   NewCodeserver =
     case Msg of
       {insert_temp_exported_types, Set} ->
-	CS#codeserver{temp_exported_types = Set};
+	NewExpTypes = sets:union(TempExpTypes, Set),
+	CS#codeserver{temp_exported_types = NewExpTypes};
       {insert_exports, List} ->
 	Set = sets:from_list(List),
 	NewExports = sets:union(Exports, Set),
