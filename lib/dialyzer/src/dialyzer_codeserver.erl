@@ -370,7 +370,7 @@ lookup_mfa_contract(MFA, CS) ->
 get_contracts(CS) ->
   call(CS, get_contracts).
 
--spec get_callbacks(codeserver()) -> dict().
+-spec get_callbacks(codeserver()) -> list().
 
 get_callbacks(CS) ->
   call(CS, get_callbacks).
