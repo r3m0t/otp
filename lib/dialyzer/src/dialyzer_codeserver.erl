@@ -96,7 +96,8 @@ cast(Codeserver, Msg) ->
 -spec init([]) -> {ok, #codeserver{}}.
 
 init([]) ->
-  ?CODESERVER = ets:new(?CODESERVER, [public, compressed, named_table]),
+  Options = [public, compressed, named_table, {read_concurrency, true}],
+  ?CODESERVER = ets:new(?CODESERVER, Options),
   {ok, #codeserver{}}.
 
 -spec handle_call(Query::term(), From::term(), #codeserver{}) ->
