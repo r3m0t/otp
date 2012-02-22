@@ -199,7 +199,7 @@ code_change(_OldVsn, State, _Extra) ->
 -spec new() -> codeserver().
 
 new() ->
-  {ok, Pid} = gen_server:start(?MODULE, [], []),
+  {ok, Pid} = gen_server:start_link(?MODULE, [], []),
   Pid.
 
 -spec delete() -> 'true'.
