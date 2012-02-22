@@ -160,7 +160,7 @@ analysis_start(Parent, Analysis) ->
     catch
       throw:{error, _ErrorMsg} = Error -> exit(Error)
     end,
-  NewPlt0 = dialyzer_plt:insert_types(Plt, dialyzer_codeserver:get_records(NewCServer)),
+  NewPlt0 = dialyzer_plt:insert_types(Plt, dialyzer_codeserver:get_records()),
   ExpTypes =  dialyzer_codeserver:get_exported_types(NewCServer),
   NewPlt1 = dialyzer_plt:insert_exported_types(NewPlt0, ExpTypes),
   State0 = State#analysis_state{plt = NewPlt1},
@@ -170,7 +170,6 @@ analysis_start(Parent, Analysis) ->
   %% Remove all old versions of the files being analyzed
   AllNodes = dialyzer_callgraph:all_nodes(Callgraph),
   Plt1 = dialyzer_plt:delete_list(NewPlt1, AllNodes),
-  Exports = dialyzer_codeserver:get_exports(NewCServer),
   NewCallgraph =
     case Analysis#analysis.race_detection of
       true -> dialyzer_callgraph:put_race_detection(true, Callgraph);
@@ -178,6 +177,7 @@ analysis_start(Parent, Analysis) ->
     end,
   State3 = analyze_callgraph(NewCallgraph, State2#analysis_state{plt = Plt1}),
   rcv_and_send_ext_types(Parent),
+  Exports = dialyzer_codeserver:get_exports(NewCServer),
   NonExports = sets:subtract(sets:from_list(AllNodes), Exports),
   NonExportsList = sets:to_list(NonExports),
   Plt2 = dialyzer_plt:delete_list(State3#analysis_state.plt, NonExportsList),
@@ -186,20 +186,20 @@ analysis_start(Parent, Analysis) ->
 
 analyze_callgraph(Callgraph, State) ->
   Codeserver = State#analysis_state.codeserver,
+  Label = dialyzer_codeserver:get_next_core_label(Codeserver),
   Parent = State#analysis_state.parent,
   DocPlt = State#analysis_state.doc_plt,
   Plt = dialyzer_plt:insert_callbacks(State#analysis_state.plt, Codeserver),
   {NewPlt, NewDocPlt} =
     case State#analysis_state.analysis_type of
       plt_build ->
-	{dialyzer_succ_typings:analyze_callgraph(Callgraph, Plt,
-						 Codeserver, Parent),
+	{dialyzer_succ_typings:analyze_callgraph(Callgraph, Plt, Label, Parent),
 	 DocPlt};
       succ_typings ->
 	NoWarn = State#analysis_state.no_warn_unused,
 	{Warnings, NewPlt0, NewDocPlt0} =
-	  dialyzer_succ_typings:get_warnings(Callgraph, Plt, DocPlt,
-					     Codeserver, NoWarn, Parent),
+	  dialyzer_succ_typings:get_warnings(Callgraph, Plt, DocPlt, Label,
+					     NoWarn, Parent),
 	send_warnings(State#analysis_state.parent, Warnings),
 	{NewPlt0, NewDocPlt0}
     end,

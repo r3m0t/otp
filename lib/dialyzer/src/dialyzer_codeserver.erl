@@ -31,11 +31,11 @@
 	 finalize_contracts/3,
          finalize_exported_types/2,
 	 finalize_records/2,
-	 get_contracts/1,
+	 get_contracts/0,
 	 get_callbacks/1,
          get_exported_types/1,
 	 get_exports/1,
-	 get_records/1,
+	 get_records/0,
 	 get_next_core_label/1,
 	 get_temp_contracts/1,
          get_temp_exported_types/1,
@@ -46,15 +46,13 @@
 	 is_exported/2,
 	 lookup_mod_code/1,
 	 lookup_mfa_code/1,
-	 lookup_mod_records/2,
-	 lookup_mod_contracts/2,
-	 lookup_mfa_contract/2,
+	 lookup_mod_records/1,
+	 lookup_mod_contracts/1,
+	 lookup_mfa_contract/1,
 	 new/0,
 	 set_next_core_label/2,
 	 set_temp_records/2,
-	 store_records/3,
 	 store_temp_records/3,
-	 store_contracts/3,
 	 store_temp_contracts/4]).
 
 -behaviour(gen_server).
@@ -67,6 +65,8 @@
 -include("dialyzer.hrl").
 
 -define(CODESERVER, dialyzer_codeserver).
+-define(CODESERVER_RECORDS, dialyzer_codeserver_records).
+-define(CODESERVER_CONTRACTS, dialyzer_codeserver_contracts).
 
 %%--------------------------------------------------------------------
 
@@ -74,9 +74,7 @@
                      temp_exported_types = sets:new() :: set(), % set(mfa())
 		     exports             = sets:new() :: set(), % set(mfa())
 		     next_core_label     = 0          :: label(),
-		     records             = dict:new() :: dict(),
 		     temp_records        = dict:new() :: dict(),
-		     contracts           = dict:new() :: dict(),
 		     callbacks           = dict:new() :: dict(),
 		     temp_contracts      = dict:new() :: dict(),
 		     temp_callbacks      = dict:new() :: dict()
@@ -96,8 +94,10 @@ cast(Codeserver, Msg) ->
 -spec init([]) -> {ok, #codeserver{}}.
 
 init([]) ->
-  Options = [public, compressed, named_table, {read_concurrency, true}],
-  ?CODESERVER = ets:new(?CODESERVER, Options),
+  CommonOptions = [public, named_table, {read_concurrency, true}],
+  Names = [?CODESERVER_RECORDS, ?CODESERVER_CONTRACTS],
+  Names = [ets:new(N, CommonOptions) || N <- Names],
+  ?CODESERVER = ets:new(?CODESERVER, [compressed|CommonOptions]),
   {ok, #codeserver{}}.
 
 -spec handle_call(Query::term(), From::term(), #codeserver{}) ->
@@ -105,11 +105,9 @@ init([]) ->
 
 handle_call(Query, _From, #codeserver{
 		     callbacks = CallDict,
-		     contracts = ContDict,
 		     exported_types = ExpTypes,
 		     exports = Exports,
 		     next_core_label = NCL,
-		     records = RecDict,
 		     temp_callbacks = TempCallDict,
 		     temp_contracts = TempContDict,
 		     temp_exported_types = TempExpTypes,
@@ -127,27 +125,8 @@ handle_call(Query, _From, #codeserver{
 	Exports;
       get_next_core_label ->
 	NCL;
-      {lookup_mod_records, Mod} ->
-	case dict:find(Mod, RecDict) of
-	  error -> dict:new();
-	  {ok, Dict} -> Dict
-	end;
-      get_records ->
-	RecDict;
       get_temp_records ->
 	TempRecDict;
-      {lookup_mod_contracts, Mod} ->
-	case dict:find(Mod, ContDict) of
-	  error -> dict:new();
-	  {ok, Dict} -> Dict
-	end;
-      {lookup_mfa_contract, {M,_F,_A} = MFA} ->
-	case dict:find(M, ContDict) of
-	  error -> error;
-	  {ok, Dict} -> dict:find(MFA, Dict)
-	end;
-      get_contracts ->
-	ContDict;
       get_callbacks ->
 	FunPreferNew = fun(_Key, _Val1, Val2) -> Val2 end,
 	FunDictMerger =
@@ -165,9 +144,7 @@ handle_call(Query, _From, #codeserver{
 handle_cast(stop, State) ->
   {stop, normal, State};
 handle_cast(Msg, #codeserver{
-	      contracts = ContDict,
 	      exports = Exports,
-	      records = RecDict,
 	      temp_exported_types = TempExpTypes,
 	      temp_callbacks = TempCallDict,
 	      temp_contracts = TempContDict,
@@ -186,23 +163,16 @@ handle_cast(Msg, #codeserver{
 	CS#codeserver{exported_types = Set, temp_exported_types = sets:new()};
       {set_next_core_label, NCL} ->
 	CS#codeserver{next_core_label = NCL};
-      {store_records, Mod, Dict} ->
-	CS#codeserver{records = dict:store(Mod, Dict, RecDict)};
       {store_temp_records, Mod, Dict} ->
 	CS#codeserver{temp_records = dict:store(Mod, Dict, TempRecDict)};
       {set_temp_records, Dict} ->
 	CS#codeserver{temp_records = Dict};
-      {finalize_records, Dict} ->
-	CS#codeserver{records = Dict, temp_records = dict:new()};
-      {store_contracts, Mod, Dict} ->
-	CS#codeserver{contracts = dict:store(Mod, Dict, ContDict)};
       {store_temp_contracts, Mod, SpecDict} ->
 	CS#codeserver{temp_contracts = dict:store(Mod, SpecDict, TempContDict)};
       {store_temp_callbacks, Mod, CallbackDict} ->
 	CS#codeserver{temp_callbacks = dict:store(Mod, CallbackDict, TempCallDict)};
-      {finalize_contracts, SpecDict, CallbackDict} ->
-	CS#codeserver{contracts = SpecDict,
-		      callbacks = CallbackDict,
+      {finalize_callbacks, CallbackDict} ->
+	CS#codeserver{callbacks = CallbackDict,
 		      temp_contracts = dict:new(),
 		      temp_callbacks = dict:new()
 		     }
@@ -235,7 +205,9 @@ new() ->
 -spec delete() -> 'true'.
 
 delete() ->
-  ets:delete(?CODESERVER).
+  ets:delete(?CODESERVER),
+  ets:delete(?CODESERVER_CONTRACTS),
+  ets:delete(?CODESERVER_RECORDS).
 
 -spec insert(atom(), cerl:c_module()) -> 'true'.
 
@@ -289,12 +261,12 @@ finalize_exported_types(Set, CS) ->
 -spec lookup_mod_code(atom()) -> cerl:c_module().
 
 lookup_mod_code(Mod) when is_atom(Mod) ->
-  table__lookup(Mod).
+  code_table_lookup(Mod).
 
 -spec lookup_mfa_code(mfa()) -> {cerl:c_var(), cerl:c_fun()}.
 
 lookup_mfa_code({_M, _F, _A} = MFA) ->
-  table__lookup(MFA).
+  code_table_lookup(MFA).
 
 -spec get_next_core_label(codeserver()) -> label().
 
@@ -306,23 +278,18 @@ get_next_core_label(CS) ->
 set_next_core_label(NCL, CS) ->
   cast(CS, {set_next_core_label, NCL}).
 
--spec store_records(atom(), dict(), codeserver()) -> codeserver().
+-spec lookup_mod_records(atom()) -> dict().
 
-store_records(Mod, Dict, CS) when is_atom(Mod) ->
-  case dict:size(Dict) =:= 0 of
-    true -> CS;
-    false -> cast(CS, {store_records, Mod, Dict})
+lookup_mod_records(Mod) when is_atom(Mod) ->
+  case ets_lookup_dict(Mod, ?CODESERVER_RECORDS) of
+    error -> dict:new();
+    {ok, Dict} -> Dict
   end.
 
--spec lookup_mod_records(atom(), codeserver()) -> dict().
+-spec get_records() -> dict().
 
-lookup_mod_records(Mod, CS) when is_atom(Mod) ->
-  call(CS, {lookup_mod_records, Mod}).
-
--spec get_records(codeserver()) -> dict().
-
-get_records(CS) ->
-  call(CS, get_records).
+get_records() ->
+  dict:from_list(ets:tab2list(?CODESERVER_RECORDS)).
 
 -spec store_temp_records(atom(), dict(), codeserver()) -> codeserver().
 
@@ -345,31 +312,31 @@ set_temp_records(Dict, CS) ->
 -spec finalize_records(dict(), codeserver()) -> codeserver().
 
 finalize_records(Dict, CS) ->
-  cast(CS, {finalize_records, Dict}).
+  ets:insert(?CODESERVER_RECORDS, dict:to_list(Dict)),
+  CS.
 
--spec store_contracts(atom(), dict(), codeserver()) -> codeserver().
+-spec lookup_mod_contracts(atom()) -> dict().
 
-store_contracts(Mod, Dict, CS) when is_atom(Mod) ->
-  case dict:size(Dict) =:= 0 of
-    true -> CS;
-    false -> cast(CS, {store_contracts, Mod, Dict})
+lookup_mod_contracts(Mod) when is_atom(Mod) ->
+  case ets_lookup_dict(Mod, ?CODESERVER_CONTRACTS) of
+    error -> dict:new();
+    {ok, Keys} ->
+      dict:from_list([get_contract_pair(Key)|| Key <- Keys])
   end.
 
--spec lookup_mod_contracts(atom(), codeserver()) -> dict().
+get_contract_pair(Key) ->
+  {Key, ets:lookup_element(?CODESERVER_CONTRACTS, Key, 2)}.
 
-lookup_mod_contracts(Mod, CS) when is_atom(Mod) ->
-  call(CS, {lookup_mod_contracts, Mod}).
-
--spec lookup_mfa_contract(mfa(), codeserver()) ->
+-spec lookup_mfa_contract(mfa()) ->
          'error' | {'ok', dialyzer_contracts:file_contract()}.
 
-lookup_mfa_contract(MFA, CS) ->
-  call(CS, {lookup_mfa_contract, MFA}).
+lookup_mfa_contract(MFA) ->
+  ets_lookup_dict(MFA, ?CODESERVER_CONTRACTS).
 
--spec get_contracts(codeserver()) -> dict().
+-spec get_contracts() -> dict().
 
-get_contracts(CS) ->
-  call(CS, get_contracts).
+get_contracts() ->
+  dict:from_list(ets:tab2list(?CODESERVER_CONTRACTS)).
 
 -spec get_callbacks(codeserver()) -> list().
 
@@ -398,14 +365,27 @@ get_temp_contracts(CS) ->
 -spec finalize_contracts(dict(), dict(), codeserver()) -> codeserver().
 
 finalize_contracts(SpecDict, CallbackDict, CS)  ->
-  cast(CS, {finalize_contracts, SpecDict, CallbackDict}).
+  true = dict:fold(fun decompose_spec_dict/3, true, SpecDict),
+  cast(CS, {finalize_callbacks, CallbackDict}).
 
-table__lookup(M) when is_atom(M) ->
+decompose_spec_dict(Mod, Dict, true) ->
+  Keys = dict:fetch_keys(Dict),
+  ets:insert(?CODESERVER_CONTRACTS, dict:to_list(Dict)),
+  ets:insert(?CODESERVER_CONTRACTS, {Mod, Keys}).
+
+code_table_lookup(M) when is_atom(M) ->
   {Name, Exports, Attrs, Keys, As} = ets_lookup(M),
-  Defs = [table__lookup(Key) || Key <- Keys],
+  Defs = [code_table_lookup(Key) || Key <- Keys],
   cerl:ann_c_module(As, Name, Exports, Attrs, Defs);
-table__lookup(MFA) ->
+code_table_lookup(MFA) ->
   ets_lookup(MFA).
 
 ets_lookup(Key) ->
   ets:lookup_element(?CODESERVER, Key, 2).
+
+ets_lookup_dict(Key, Table) ->
+  try ets:lookup_element(Table, Key, 2) of
+      Val -> {ok, Val}
+  catch
+    _:_ -> error
+  end.

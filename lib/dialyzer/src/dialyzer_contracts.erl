@@ -24,7 +24,7 @@
 	 check_contracts/3,
 	 contracts_without_fun/3,
 	 contract_to_string/1,
-	 get_invalid_contract_warnings/3,
+	 get_invalid_contract_warnings/2,
 	 get_contract_args/1,
 	 get_contract_return/1,
 	 get_contract_return/2,
@@ -144,7 +144,7 @@ process_contract_remote_types(CodeServer) ->
   {TmpContractDict, TmpCallbackDict} =
     dialyzer_codeserver:get_temp_contracts(CodeServer),
   ExpTypes = dialyzer_codeserver:get_exported_types(CodeServer),
-  RecordDict = dialyzer_codeserver:get_records(CodeServer),
+  RecordDict = dialyzer_codeserver:get_records(),
   ContractFun =
     fun({_M, _F, _A}, {File, #tmp_contract{contract_funs = CFuns, forms = Forms}}) ->
 	NewCs = [CFun(ExpTypes, RecordDict) || CFun <- CFuns],
@@ -426,18 +426,19 @@ general_domain([], AccSig) ->
   AccSig1 = erl_types:subst_all_vars_to_any(AccSig),
   erl_types:t_fun_args(AccSig1).
 
--spec get_invalid_contract_warnings([module()], dialyzer_codeserver:codeserver(), dialyzer_plt:plt()) -> [dial_warning()].
+-spec get_invalid_contract_warnings([module()], dialyzer_plt:plt()) ->
+        [dial_warning()].
 
-get_invalid_contract_warnings(Modules, CodeServer, Plt) ->
-  get_invalid_contract_warnings_modules(Modules, CodeServer, Plt, []).
+get_invalid_contract_warnings(Modules, Plt) ->
+  get_invalid_contract_warnings_modules(Modules, Plt, []).
 
-get_invalid_contract_warnings_modules([Mod|Mods], CodeServer, Plt, Acc) ->
-  Contracts1 = dialyzer_codeserver:lookup_mod_contracts(Mod, CodeServer),
+get_invalid_contract_warnings_modules([Mod|Mods], Plt, Acc) ->
+  Contracts1 = dialyzer_codeserver:lookup_mod_contracts(Mod),
   Contracts2 = dict:to_list(Contracts1),
-  Records = dialyzer_codeserver:lookup_mod_records(Mod, CodeServer),
+  Records = dialyzer_codeserver:lookup_mod_records(Mod),
   NewAcc = get_invalid_contract_warnings_funs(Contracts2, Plt, Records, Acc),
-  get_invalid_contract_warnings_modules(Mods, CodeServer, Plt, NewAcc);
-get_invalid_contract_warnings_modules([], _CodeServer, _Plt, Acc) ->
+  get_invalid_contract_warnings_modules(Mods, Plt, NewAcc);
+get_invalid_contract_warnings_modules([], _Plt, Acc) ->
   Acc.
 
 get_invalid_contract_warnings_funs([{MFA, {FileLine, Contract}}|Left],

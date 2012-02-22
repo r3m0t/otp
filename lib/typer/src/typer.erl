@@ -133,20 +133,19 @@ extract(#analysis{macros = Macros,
     end,
   CodeServer1 = lists:foldl(Fun, CodeServer, TrustedFiles),
   %% Process remote types
-  NewCodeServer =
-    try
-      NewRecords = dialyzer_codeserver:get_temp_records(CodeServer1),
-      OldRecords = dialyzer_plt:get_types(TrustPLT), % XXX change to the PLT?
-      MergedRecords = dialyzer_utils:merge_records(NewRecords, OldRecords),
-      CodeServer2 = dialyzer_codeserver:set_temp_records(MergedRecords, CodeServer1),
-      CodeServer3 = dialyzer_utils:process_record_remote_types(CodeServer2),
-      dialyzer_contracts:process_contract_remote_types(CodeServer3)
-    catch
-      throw:{error, ErrorMsg} ->
-	compile_error(ErrorMsg)
-    end,
+  try
+    NewRecords = dialyzer_codeserver:get_temp_records(CodeServer1),
+    OldRecords = dialyzer_plt:get_types(TrustPLT), % XXX change to the PLT?
+    MergedRecords = dialyzer_utils:merge_records(NewRecords, OldRecords),
+    CodeServer2 = dialyzer_codeserver:set_temp_records(MergedRecords, CodeServer1),
+    CodeServer3 = dialyzer_utils:process_record_remote_types(CodeServer2),
+    dialyzer_contracts:process_contract_remote_types(CodeServer3)
+  catch
+    throw:{error, ErrorMsg} ->
+      compile_error(ErrorMsg)
+  end,
   %% Create TrustPLT
-  Contracts = dialyzer_codeserver:get_contracts(NewCodeServer),
+  Contracts = dialyzer_codeserver:get_contracts(),
   Modules = dict:fetch_keys(Contracts),
   FoldFun =
     fun(Module, TmpPlt) ->
@@ -167,9 +166,10 @@ get_type_info(#analysis{callgraph = CallGraph,
 			codeserver = CodeServer} = Analysis) ->
   StrippedCallGraph = remove_external(CallGraph, TrustPLT),
   %% io:format("--- Analyzing callgraph... "),
-  try 
+  try
+    Label = dialyzer_codeserver:get_next_core_label(CodeServer),
     NewPlt = dialyzer_succ_typings:analyze_callgraph(StrippedCallGraph, 
-						     TrustPLT, CodeServer),
+						     TrustPLT, Label),
     Analysis#analysis{callgraph = StrippedCallGraph, trust_plt = NewPlt}
   catch
     error:What ->
@@ -388,21 +388,20 @@ get_types(Module, Analysis, Records) ->
       none -> [];
       {value, List} -> List
     end,
-  CodeServer = Analysis#analysis.codeserver,
   TypeInfoList =
     case Analysis#analysis.show_succ of
       true ->
 	[convert_type_info(I) || I <- TypeInfo];
       false ->
-	[get_type(I, CodeServer, Records) || I <- TypeInfo]
+	[get_type(I, Records) || I <- TypeInfo]
     end,
   map__from_list(TypeInfoList).
 
 convert_type_info({{_M, F, A}, Range, Arg}) ->
   {{F, A}, {Range, Arg}}.
 
-get_type({{M, F, A} = MFA, Range, Arg}, CodeServer, Records) ->
-  case dialyzer_codeserver:lookup_mfa_contract(MFA, CodeServer) of
+get_type({{M, F, A} = MFA, Range, Arg}, Records) ->
+  case dialyzer_codeserver:lookup_mfa_contract(MFA) of
     error ->
       {{F, A}, {Range, Arg}};
     {ok, {_FileLine, Contract}} ->

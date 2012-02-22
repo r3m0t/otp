@@ -30,7 +30,7 @@
 
 -module(dialyzer_behaviours).
 
--export([check_callbacks/5, get_behaviour_apis/1,
+-export([check_callbacks/4, get_behaviour_apis/1,
 	 translate_behaviour_api_call/5, translatable_behaviours/1,
 	 translate_callgraph/3]).
 
@@ -45,7 +45,6 @@
 -type behaviour() :: atom().
 
 -record(state, {plt        :: dialyzer_plt:plt(),
-		codeserver :: dialyzer_codeserver:codeserver(),
 		filename   :: file:filename(),
 		behlines   :: [{behaviour(), non_neg_integer()}],
 		records    :: dict()}).
@@ -53,10 +52,9 @@
 %%--------------------------------------------------------------------
 
 -spec check_callbacks(module(), [{cerl:cerl(), cerl:cerl()}], dict(),
-		      dialyzer_plt:plt(),
-		      dialyzer_codeserver:codeserver()) -> [dial_warning()].
+		      dialyzer_plt:plt()) -> [dial_warning()].
 
-check_callbacks(Module, Attrs, Records, Plt, Codeserver) ->
+check_callbacks(Module, Attrs, Records, Plt) ->
   {Behaviours, BehLines} = get_behaviours(Attrs),
   case Behaviours of
     [] -> [];
@@ -65,7 +63,7 @@ check_callbacks(Module, Attrs, Records, Plt, Codeserver) ->
       {_Var,Code} = dialyzer_codeserver:lookup_mfa_code(MFA),
       File = get_file(cerl:get_ann(Code)),
       State = #state{plt = Plt, filename = File, behlines = BehLines,
-		     codeserver = Codeserver, records = Records},
+		     records = Records},
       Warnings = get_warnings(Module, Behaviours, State),
       [add_tag_file_line(Module, W, State) || W <- Warnings]
   end.
@@ -101,8 +99,7 @@ check_behaviour(Module, Behaviour, #state{plt = Plt} = State, Acc) ->
 check_all_callbacks(_Module, _Behaviour, [], _State, Acc) ->
   Acc;
 check_all_callbacks(Module, Behaviour, [Cb|Rest],
-		    #state{plt = Plt, codeserver = Codeserver,
-			   records = Records} = State, Acc) ->
+		    #state{plt = Plt, records = Records} = State, Acc) ->
   {{Behaviour, Function, Arity},
    {{_BehFile, _BehLine}, Callback}} = Cb,
   CbMFA = {Module, Function, Arity},
@@ -140,7 +137,7 @@ check_all_callbacks(Module, Behaviour, [Cb|Rest],
 	Acc02
     end,
   Acc2 =
-    case dialyzer_codeserver:lookup_mfa_contract(CbMFA, Codeserver) of
+    case dialyzer_codeserver:lookup_mfa_contract(CbMFA) of
       'error' -> Acc1;
       {ok, {{File, Line}, Contract}} ->
 	Acc10 = Acc1,
