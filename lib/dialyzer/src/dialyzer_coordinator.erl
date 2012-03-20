@@ -37,7 +37,7 @@
 %%% Exports for the compilation workers
 -export([get_next_label/2]).
 
--export_type([coordinator/0, mode/0, init_data/0]).
+-export_type([coordinator/0, mode/0, init_data/0, result/0]).
 
 %%--------------------------------------------------------------------
 
@@ -95,8 +95,13 @@
 		      warnings_result().
 
 parallel_job(Mode, Jobs, InitData) ->
-  State = spawn_jobs(Mode, Jobs, InitData),
-  collect_result(Mode, State).
+  case dialyzer_utils:parallelism() of
+    1 ->
+      sequential_job(Mode, Jobs, InitData);
+    _ ->
+      State = spawn_jobs(Mode, Jobs, InitData),
+      collect_result(Mode, State)
+  end.
 
 spawn_jobs(Mode, Jobs, InitData) when
     Mode =:= 'typesig'; Mode =:= 'dataflow' ->
@@ -251,3 +256,44 @@ wait_activation() ->
 
 activate_pid(Pid) ->
   Pid ! activate.
+
+%%------------------------------------------------------------------------------
+
+sequential_job(Mode, Jobs, InitData) ->
+  JobCount = length(Jobs),
+  Unit =
+    case Mode of
+      'typesig'  -> "SCCs";
+      _ -> "modules"
+    end,
+  dialyzer_timing:send_size_info(JobCount, Unit),
+  case Mode of
+    'compile' ->
+      Fold =
+	fun(Job, {Result, Label}) ->
+	    {LabelAdd, Data} =
+	      dialyzer_worker:sequential('compile', Job, InitData, Label),
+	    NewResult =
+	      dialyzer_analysis_callgraph:add_to_result(Job, Data,
+							Result, InitData),
+	    {NewResult, Label + LabelAdd}
+	end,
+      lists:foldl(Fold, {dialyzer_analysis_callgraph:compile_init_result(), 0},
+		  Jobs);
+    X when X =:= 'typesig'; X =:= 'dataflow' ->
+      Fold =
+	fun(Job, Result) ->
+	    Data = dialyzer_worker:sequential(X, Job, InitData, unused),
+	    Data ++ Result
+	end,
+      Result = lists:foldl(Fold, [], Jobs),
+      dialyzer_succ_typings:lookup_names(Result, InitData);
+    'warnings' ->
+      Fold =
+	fun(Job, Result) ->
+	    Data =
+	      dialyzer_worker:sequential('warnings', Job, InitData, unused),
+	    Data ++ Result
+	end,
+      lists:foldl(Fold, [], Jobs)
+  end.

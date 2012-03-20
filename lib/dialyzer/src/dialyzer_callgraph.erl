@@ -111,7 +111,9 @@
 
 -type callgraph() :: #callgraph{}.
 
--type active_digraph() :: {'d', digraph()} | {'e', ets:tid(), ets:tid()}.
+-type active_digraph() :: {'d', digraph()} |
+			  {'e', ets:tid(), ets:tid()} |
+			  'unused'.
 
 %%----------------------------------------------------------------------
 
@@ -285,8 +287,14 @@ module_postorder(#callgraph{digraph = DG}) ->
   digraph_confirm_vertices(sets:to_list(Nodes), MDG),
   Foreach = fun({M1,M2}) -> digraph:add_edge(MDG, M1, M2) end,
   lists:foreach(Foreach, sets:to_list(Edges)),
-  PostOrder = digraph_utils:topsort(MDG),
-  {PostOrder, {'d', MDG}}.
+  case dialyzer_utils:parallelism() of
+    1 ->
+      PostOrder = digraph_utils:postorder(MDG),
+      digraph:delete(MDG),
+      {PostOrder, 'unused'};
+    _ ->
+      {digraph_utils:topsort(MDG), {'d', MDG}}
+  end.
 
 edge_fold({{M1,_,_},{M2,_,_}}, Set) ->
   case M1 =/= M2 of
@@ -560,7 +568,9 @@ active_digraph_delete({'d', DG}) ->
   digraph:delete(DG);
 active_digraph_delete({'e', Out, In}) ->
   ets:delete(Out),
-  ets:delete(In).
+  ets:delete(In);
+active_digraph_delete('unused') ->
+  true.
 
 digraph_edges(DG) ->
   digraph:edges(DG).
@@ -804,6 +814,18 @@ to_ps(#callgraph{} = CG, File, Args) ->
   ok.
 
 condensation(G) ->
+  case dialyzer_utils:parallelism() of
+    1 -> sequential_condensation(G);
+    _ -> parallel_condensation(G)
+  end.
+
+sequential_condensation(G) ->
+  Condensed = digraph_utils:condensation(G),
+  PostOrder = digraph_utils:postorder(Condensed),
+  digraph:delete(Condensed),
+  {unused, PostOrder}.
+
+parallel_condensation(G) ->
   SCs = digraph_utils:strong_components(G),
   V2I = ets:new(condensation, []),
   I2C = ets:new(condensation, []),
