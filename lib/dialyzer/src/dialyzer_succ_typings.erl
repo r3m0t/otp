@@ -309,7 +309,7 @@ compare_types_1([], [], _Strict, NotFixpoint) ->
 
 find_succ_typings(SCCs, #st{next_label = NextLabel, callgraph = Callgraph,
 			    plt = Plt} = State) ->
-  Init = {NextLabel, dialyzer_callgraph:mini_callgraph(Callgraph), Plt},
+  Init = {NextLabel, Callgraph, Plt},
   NotFixpoint =
     ?timing("typesig",
 	    dialyzer_coordinator:parallel_job(typesig, SCCs, Init)),
