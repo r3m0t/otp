@@ -83,6 +83,7 @@ start() ->
   {Args, Analysis} = process_cl_args(),
   %% io:format("Args: ~p\n", [Args]),
   %% io:format("Analysis: ~p\n", [Analysis]),
+  dialyzer_timing:init(false),
   TrustedFiles = filter_fd(Args#args.trusted, [], fun is_erl_file/1),
   Analysis2 = extract(Analysis, TrustedFiles),
   All_Files = get_all_files(Args),
@@ -91,6 +92,7 @@ start() ->
   Analysis4 = collect_info(Analysis3),
   %% io:format("Final: ~p\n", [Analysis4#analysis.fms]),
   TypeInfo = get_type_info(Analysis4),
+  dialyzer_timing:stop(),
   show_or_annotate(TypeInfo),
   %% io:format("\nTyper analysis finished\n"),
   erlang:halt(0).
@@ -101,10 +103,10 @@ start() ->
 
 extract(#analysis{macros = Macros,
 		  includes = Includes,
-		  trust_plt = TrustPLT} = Analysis, TrustedFiles) ->
+		  trust_plt = TrustPLT,
+		  codeserver = CodeServer} = Analysis, TrustedFiles) ->
   %% io:format("--- Extracting trusted typer_info... "),
   Ds = [{d, Name, Value} || {Name, Value} <- Macros],
-  CodeServer = dialyzer_codeserver:new(),
   Fun =
     fun(File, CS) ->
 	%% We include one more dir; the one above the one we are trusting
@@ -131,20 +133,19 @@ extract(#analysis{macros = Macros,
     end,
   CodeServer1 = lists:foldl(Fun, CodeServer, TrustedFiles),
   %% Process remote types
-  NewCodeServer =
-    try
-      NewRecords = dialyzer_codeserver:get_temp_records(CodeServer1),
-      OldRecords = dialyzer_plt:get_types(TrustPLT), % XXX change to the PLT?
-      MergedRecords = dialyzer_utils:merge_records(NewRecords, OldRecords),
-      CodeServer2 = dialyzer_codeserver:set_temp_records(MergedRecords, CodeServer1),
-      CodeServer3 = dialyzer_utils:process_record_remote_types(CodeServer2),
-      dialyzer_contracts:process_contract_remote_types(CodeServer3)
-    catch
-      throw:{error, ErrorMsg} ->
-	compile_error(ErrorMsg)
-    end,
+  try
+    NewRecords = dialyzer_codeserver:get_temp_records(CodeServer1),
+    OldRecords = dialyzer_plt:get_types(TrustPLT), % XXX change to the PLT?
+    MergedRecords = dialyzer_utils:merge_records(NewRecords, OldRecords),
+    CodeServer2 = dialyzer_codeserver:set_temp_records(MergedRecords, CodeServer1),
+    CodeServer3 = dialyzer_utils:process_record_remote_types(CodeServer2),
+    dialyzer_contracts:process_contract_remote_types(CodeServer3)
+  catch
+    throw:{error, ErrorMsg} ->
+      compile_error(ErrorMsg)
+  end,
   %% Create TrustPLT
-  Contracts = dialyzer_codeserver:get_contracts(NewCodeServer),
+  Contracts = dialyzer_codeserver:get_contracts(),
   Modules = dict:fetch_keys(Contracts),
   FoldFun =
     fun(Module, TmpPlt) ->
@@ -165,9 +166,10 @@ get_type_info(#analysis{callgraph = CallGraph,
 			codeserver = CodeServer} = Analysis) ->
   StrippedCallGraph = remove_external(CallGraph, TrustPLT),
   %% io:format("--- Analyzing callgraph... "),
-  try 
+  try
+    Label = dialyzer_codeserver:get_next_core_label(CodeServer),
     NewPlt = dialyzer_succ_typings:analyze_callgraph(StrippedCallGraph, 
-						     TrustPLT, CodeServer),
+						     TrustPLT, Label),
     Analysis#analysis{callgraph = StrippedCallGraph, trust_plt = NewPlt}
   catch
     error:What ->
@@ -181,7 +183,6 @@ get_type_info(#analysis{callgraph = CallGraph,
 
 remove_external(CallGraph, PLT) ->
   {StrippedCG0, Ext} = dialyzer_callgraph:remove_external(CallGraph),
-  StrippedCG = dialyzer_callgraph:finalize(StrippedCG0),
   case get_external(Ext, PLT) of
     [] -> ok;
     Externals ->
@@ -192,7 +193,7 @@ remove_external(CallGraph, PLT) ->
         _ -> msg(io_lib:format(" Unknown types: ~p\n", [ExtTypes]))
       end
   end,
-  StrippedCG.
+  StrippedCG0.
 
 -spec get_external([{mfa(), mfa()}], plt()) -> [mfa()].
 
@@ -387,21 +388,20 @@ get_types(Module, Analysis, Records) ->
       none -> [];
       {value, List} -> List
     end,
-  CodeServer = Analysis#analysis.codeserver,
   TypeInfoList =
     case Analysis#analysis.show_succ of
       true ->
 	[convert_type_info(I) || I <- TypeInfo];
       false ->
-	[get_type(I, CodeServer, Records) || I <- TypeInfo]
+	[get_type(I, Records) || I <- TypeInfo]
     end,
   map__from_list(TypeInfoList).
 
 convert_type_info({{_M, F, A}, Range, Arg}) ->
   {{F, A}, {Range, Arg}}.
 
-get_type({{M, F, A} = MFA, Range, Arg}, CodeServer, Records) ->
-  case dialyzer_codeserver:lookup_mfa_contract(MFA, CodeServer) of
+get_type({{M, F, A} = MFA, Range, Arg}, Records) ->
+  case dialyzer_codeserver:lookup_mfa_contract(MFA) of
     error ->
       {{F, A}, {Range, Arg}};
     {ok, {_FileLine, Contract}} ->
@@ -888,8 +888,8 @@ analyze_core_tree(Core, Records, SpecInfo, CbInfo, ExpTypes, Analysis, File) ->
   CS1 = Analysis#analysis.codeserver,
   NextLabel = dialyzer_codeserver:get_next_core_label(CS1),
   {Tree, NewLabel} = cerl_trees:label(TmpTree, NextLabel),
-  CS2 = dialyzer_codeserver:insert(Module, Tree, CS1),
-  CS3 = dialyzer_codeserver:set_next_core_label(NewLabel, CS2),
+  true = dialyzer_codeserver:insert(Module, Tree),
+  CS3 = dialyzer_codeserver:set_next_core_label(NewLabel, CS1),
   CS4 = dialyzer_codeserver:store_temp_records(Module, Records, CS3),
   CS5 =
     case Analysis#analysis.no_spec of
@@ -901,8 +901,9 @@ analyze_core_tree(Core, Records, SpecInfo, CbInfo, ExpTypes, Analysis, File) ->
   MergedExpTypes = sets:union(ExpTypes, OldExpTypes),
   CS6 = dialyzer_codeserver:insert_temp_exported_types(MergedExpTypes, CS5),
   Ex_Funcs = [{0,F,A} || {_,_,{F,A}} <- cerl:module_exports(Tree)],
-  TmpCG = Analysis#analysis.callgraph,
-  CG = dialyzer_callgraph:scan_core_tree(Tree, TmpCG),
+  CG = Analysis#analysis.callgraph,
+  {V, E} = dialyzer_callgraph:scan_core_tree(Tree, CG),
+  dialyzer_callgraph:add_edges(E, V, CG),
   Fun = fun analyze_one_function/2,
   All_Defs = cerl:module_defs(Tree),
   Acc = lists:foldl(Fun, #tmpAcc{file = File, module = Module}, All_Defs),

@@ -110,6 +110,7 @@
 -type label()	      :: non_neg_integer().
 -type rep_mode()      :: 'quiet' | 'normal' | 'verbose'.
 -type start_from()    :: 'byte_code' | 'src_code'.
+-type mfa_or_funlbl() :: label() | mfa().
 
 %%--------------------------------------------------------------------
 %% Record declarations used by various files
@@ -126,11 +127,13 @@
 		   use_contracts  = true           :: boolean(),
 		   race_detection = false	   :: boolean(),
 		   behaviours_chk = false          :: boolean(),
+		   timing         = false          :: boolean(),
 		   callgraph_file = ""             :: file:filename()}).
 
 -record(options, {files           = []		   :: [file:filename()],
 		  files_rec       = []		   :: [file:filename()],
 		  analysis_type   = succ_typings   :: anal_type1(),
+		  timing          = false          :: boolean(),
 		  defines         = []		   :: [dial_define()],
 		  from            = byte_code	   :: start_from(),
 		  get_warnings    = maybe          :: boolean() | 'maybe',
@@ -152,3 +155,12 @@
 		   forms	  = []		   :: [{_, _}]}).
 
 %%--------------------------------------------------------------------
+
+-define(timing(Msg,Var,Expr),
+	begin
+	    dialyzer_timing:start_stamp(Msg),
+	    Var = Expr,
+	    dialyzer_timing:end_stamp(),
+	    Var
+	end).
+-define(timing(Msg,Expr),?timing(Msg,_T,Expr)).

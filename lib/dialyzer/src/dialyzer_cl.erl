@@ -393,7 +393,8 @@ do_analysis(Files, Options, Plt, PltInfo) ->
 			   defines = Options#options.defines,
 			   include_dirs = Options#options.include_dirs,
 			   files = Files,
-			   start_from = Options#options.from, 
+			   start_from = Options#options.from,
+			   timing = Options#options.timing,
 			   plt = Plt,
 			   use_contracts = Options#options.use_contracts,
 			   callgraph_file = Options#options.callgraph_file},
@@ -591,6 +592,9 @@ cl_loop(State, LogCache) ->
     {BackendPid, mod_deps, ModDeps} ->
       NewState = State#cl_state{mod_deps = ModDeps},
       cl_loop(NewState, LogCache);
+    {BackendPid, cserver, CServer, _Plt} ->
+      gen_server:cast(CServer, stop),
+      cl_loop(State, LogCache);
     {'EXIT', BackendPid, {error, Reason}} ->
       Msg = failed_anal_msg(Reason, LogCache),
       cl_error(State, Msg);
