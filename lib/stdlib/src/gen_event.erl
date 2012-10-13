@@ -247,13 +247,13 @@ handle_msg(Msg, Parent, ServerName, MSL, Debug) ->
 	{notify, Event} ->
 	    {Hib,MSL1} = server_notify(Event, handle_event, MSL, ServerName),
 	    loop(Parent, ServerName, MSL1, Debug, Hib);
+	{'EXIT', From, Reason} ->
+	    MSL1 = handle_exit(From, Reason, MSL, ServerName),
+	    loop(Parent, ServerName, MSL1, Debug, false);
 	{From, Tag, {sync_notify, Event}} ->
 	    {Hib, MSL1} = server_notify(Event, handle_event, MSL, ServerName),
 	    ?reply(ok),
 	    loop(Parent, ServerName, MSL1, Debug, Hib);
-	{'EXIT', From, Reason} ->
-	    MSL1 = handle_exit(From, Reason, MSL, ServerName),
-	    loop(Parent, ServerName, MSL1, Debug, false);
 	{From, Tag, {call, Handler, Query}} ->
 	    {Hib, Reply, MSL1} = server_call(Handler, Query, MSL, ServerName),
 	    ?reply(Reply),
